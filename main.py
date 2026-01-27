@@ -11,7 +11,7 @@ from collections import OrderedDict # [NEW] 캐싱을 위한 도구
 
 # ==========================================
 # [API KEY] 네 키가 여기 있어야 한다.
-GOOGLE_API_KEY = "AIzaSyAN5W65r8wDmlChmGJgtlNrbPCKWKpJ3pc"
+GOOGLE_API_KEY = "내 키"
 # ==========================================
 
 genai.configure(api_key=GOOGLE_API_KEY)
