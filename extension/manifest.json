@@ -17,4 +17,19 @@
       "js": ["content.js"]
     }
   ]
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
+
+  // [Update] 2. 브라우저 우측 상단 툴바에 보일 아이콘
+  "action": {
+    "default_title": "Liquid UI 실행",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
 }
