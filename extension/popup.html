@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <style>
+      body { width: 350px; padding: 15px; font-family: 'Segoe UI', sans-serif; }
+      h2 { margin: 0 0 10px 0; font-size: 18px; color: #333; }
+      
+      button { 
+        width: 100%; padding: 12px; 
+        background: #4285F4; color: white; 
+        border: none; border-radius: 8px; 
+        font-weight: bold; cursor: pointer; 
+        transition: background 0.2s;
+      }
+      button:hover { background: #357ABD; }
+      button:disabled { background: #ccc; cursor: not-allowed; }
+
+      #resultArea { 
+        margin-top: 15px; 
+        padding: 10px; 
+        background: #f1f3f4; 
+        border-radius: 8px; 
+        min-height: 100px;
+        font-size: 14px; 
+        line-height: 1.5;
+        color: #202124;
+        white-space: pre-wrap; /* 줄바꿈 유지 */
+      }
+      .status { font-size: 12px; color: #666; margin-bottom: 5px; }
+    </style>
+  </head>
+  <body>
+    <h2>Liquid UI: 요약 봇 🤖</h2>
+    <div class="status" id="statusText">준비 완료</div>
+    <button id="analyzeBtn">⚡ 현재 페이지 3줄 요약</button>
+    <div id="resultArea">결과가 여기에 스트리밍됩니다...</div>
+    <script src="popup.js"></script>
+  </body>
+</html>
