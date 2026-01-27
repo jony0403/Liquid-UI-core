@@ -8,6 +8,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+// [수정] toggleUI: 로딩 중에는 이미지를 보여주지 않는다.
 function toggleUI() {
   if (liquidRoot) {
     document.body.removeChild(liquidRoot);
@@ -31,34 +32,27 @@ function toggleUI() {
   shadowRoot = liquidRoot.attachShadow({ mode: "open" });
   document.body.appendChild(liquidRoot);
 
-  // [핵심 기술] 현재 페이지의 메타태그(og:image)를 직접 조회
-  // 서버가 못 찾아도 내 브라우저는 알고 있다.
+  // 1. 클라이언트 사이드 이미지 확보 (하지만 아직 안 보여줌)
   const metaImg = document.querySelector('meta[property="og:image"]');
   const localImage = metaImg ? metaImg.content : "";
-
-  // [중요] 세탁소(Proxy)를 거쳐서 바로 띄워버린다.
-  let finalImgUrl = "";
+  let preloadedUrl = "";
+  
   if (localImage) {
-      finalImgUrl = `https://wsrv.nl/?url=${encodeURIComponent(localImage)}&w=400&h=200&fit=cover`;
+      preloadedUrl = `https://wsrv.nl/?url=${encodeURIComponent(localImage)}&w=400&h=200&fit=cover`;
   }
 
-  // 로딩 화면이 뜰 때, 이미지는 미리 박아둔다. (기다릴 필요 없음)
-  renderUI("loading", "", finalImgUrl);
+  // 2. 로딩 화면 출력 (이미지 없이 깔끔하게 스피너만)
+  renderUI("loading");
   
-  // 텍스트 분석 시작 (이미지 URL은 이미 찾았으니 텍스트만 신경 쓰라고 함)
-  analyzePage(window.location.href, document.body.innerText, finalImgUrl);
+  // 3. 분석 시작 (확보한 이미지를 넘겨줌)
+  analyzePage(window.location.href, document.body.innerText, preloadedUrl);
 }
 
-// 2. UI 그리기 (이미지 강제 노출 로직 적용됨)
+// UI 그리기 함수
 function renderUI(state, data = "", imageUrl = "") {
   
-  // [핵심] 기본 이미지 설정
   const defaultImg = "https://images.unsplash.com/photo-1504711434969-e33886168f5c?q=80&w=3870&auto=format&fit=crop";
-  
-  // 서버가 준 URL이 있으면 쓰고, 없거나 빈칸이면 기본값 사용
   const finalUrl = imageUrl || defaultImg;
-  
-  // 무조건 'active'를 붙여서 숨겨지는 일 없게 함
   const imgClass = "hero-image active"; 
 
   const style = `
@@ -67,15 +61,23 @@ function renderUI(state, data = "", imageUrl = "") {
       .container { padding: 20px; height: 100%; box-sizing: border-box; overflow-y: auto; }
       h2 { margin: 0 0 15px 0; font-size: 20px; color: #1a73e8; font-weight: 700; display: flex; align-items: center; gap: 8px;}
       
-      /* 이미지 스타일 */
       .hero-image { width: 100%; height: 180px; object-fit: cover; border-radius: 12px; margin-bottom: 20px; display: none; background: #f0f0f0; }
       .hero-image.active { display: block; }
       
       .content { line-height: 1.7; font-size: 15px; color: #444; white-space: pre-wrap; }
       
-      .loading { text-align: center; margin-top: 50%; transform: translateY(-50%); }
-      .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+      /* 로딩 디자인 */
+      .loading { 
+        display: flex; 
+        flex-direction: column; 
+        justify-content: center; 
+        align-items: center; 
+        height: 100%; 
+        text-align: center; 
+      }
+      .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 15px; }
       @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      .loading-text { font-size: 14px; color: #666; font-weight: 500; }
       
       a { color: #1a73e8; text-decoration: none; display: block; padding: 12px; background: #f8f9fa; border-radius: 8px; margin-top: 10px; font-weight: 500; font-size: 14px; transition: background 0.2s; }
       a:hover { background: #e8f0fe; }
@@ -87,17 +89,15 @@ function renderUI(state, data = "", imageUrl = "") {
       <div class="container">
         <div class="loading">
           <div class="spinner"></div>
-          <p>AI가 페이지를 분석 중입니다...</p>
+          <div class="loading-text">AI가 페이지를 분석 중입니다...</div>
         </div>
       </div>`;
   } else if (state === "success") {
     shadowRoot.innerHTML = style + `
       <div class="container">
         <h2>🌊 Liquid Summary</h2>
-        
         <img src="${finalUrl}" class="${imgClass}" id="summary-image" 
              onerror="this.onerror=null; this.src='${defaultImg}';">
-        
         <div class="content" id="stream-target">${data}</div>
         <br>
         <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
@@ -107,7 +107,7 @@ function renderUI(state, data = "", imageUrl = "") {
   }
 }
 
-// [수정] analyzePage 함수: 이미 찾은 이미지가 있으면 서버 이미지는 무시한다.
+// [핵심 수정] analyzePage: 텍스트가 올 때까지 로딩을 유지한다.
 async function analyzePage(url, text, preloadedImage = "") {
   try {
     const response = await fetch("http://localhost:8000/analyze", {
@@ -120,7 +120,10 @@ async function analyzePage(url, text, preloadedImage = "") {
     const decoder = new TextDecoder();
     
     let buffer = ""; 
-    let isFirstChunk = true;
+    // 서버가 주는 이미지 URL을 임시 저장할 변수
+    let pendingServerImage = "";
+    // 화면이 전환되었는지 체크하는 깃발
+    let isRendered = false;
 
     while (true) {
       const { value, done } = await reader.read();
@@ -129,52 +132,59 @@ async function analyzePage(url, text, preloadedImage = "") {
       const chunk = decoder.decode(value);
       buffer += chunk;
 
-      if (isFirstChunk) {
-        // 이미지가 있으면 그걸 쓰고, 없으면 빈칸으로 시작
-        renderUI("success", "", preloadedImage); 
-        isFirstChunk = false;
-      }
-
-      const target = shadowRoot.getElementById("stream-target");
-      const imageTag = shadowRoot.getElementById("summary-image");
-      
-      if (target) {
-        if (buffer.includes("IMAGE_URL::") && buffer.includes("::END")) {
+      // 1. 이미지 URL 파싱 (화면엔 아직 안 그림)
+      if (buffer.includes("IMAGE_URL::") && buffer.includes("::END")) {
           const start = buffer.indexOf("IMAGE_URL::");
           const end = buffer.indexOf("::END");
-          
-          // 서버가 찾은 이미지 주소
           const rawUrl = buffer.substring(start + 11, end).trim();
           
-          // [핵심] 
-          // 1. 우리가 이미 찾은 이미지(preloadedImage)가 있으면 서버 거 무시!
-          // 2. 만약 우리가 못 찾았는데(빈칸), 서버가 찾았으면 그걸 쓴다.
-          if (!preloadedImage && rawUrl) {
-             const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&w=400&h=200&fit=cover`;
-             if (imageTag) imageTag.src = proxyUrl;
+          // 서버 이미지를 찾으면 저장해둠 (나중에 씀)
+          if (rawUrl) {
+             pendingServerImage = `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&w=400&h=200&fit=cover`;
           }
           
-          target.innerText = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
-        } else {
-          target.innerText = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
+          // 버퍼에서 이미지 태그 제거 (텍스트만 남김)
+          buffer = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
+      }
+
+      // 2. [결정적 순간] 버퍼에 '글자'가 쌓이기 시작했는가?
+      // 공백 제거하고도 내용이 있어야 함.
+      if (!isRendered && buffer.trim().length > 0) {
+        
+        // 우선순위: 내 브라우저가 찾은 이미지 > 서버가 찾은 이미지 > 기본값
+        const finalImageToUse = preloadedImage || pendingServerImage;
+        
+        // ✨ 여기서 로딩을 끄고 -> 이미지와 텍스트를 동시에 띄운다!
+        renderUI("success", buffer, finalImageToUse);
+        isRendered = true;
+      }
+
+      // 3. 이미 화면이 떴으면, 텍스트가 들어오는 족족 추가해준다 (스트리밍 효과)
+      if (isRendered) {
+        const target = shadowRoot.getElementById("stream-target");
+        if (target) {
+            target.innerText = buffer;
         }
       }
     }
   } catch (e) {
-      // 에러 처리 (기존과 동일)
       const loadingDiv = shadowRoot.querySelector(".loading");
-      if (loadingDiv) loadingDiv.innerHTML = `<p style="color:red;">에러: ${e.message}</p>`;
+      if (loadingDiv) {
+          loadingDiv.innerHTML = `<p style="color:red; font-weight:bold;">앗, 에러가 났어요!<br>${e.message}</p>`;
+      } else {
+          shadowRoot.innerHTML += `<p style="color:red">에러: ${e.message}</p>`;
+      }
   }
 }
 
-// 4. 링크 클릭 가로채기 (페이지 이동 방지)
 function attachLinkInterceptors() {
   const links = shadowRoot.querySelectorAll("a");
   links.forEach(link => {
     link.addEventListener("click", (e) => {
-      e.preventDefault(); // 이동 막고
-      renderUI("loading"); // 로딩 띄우고
-      analyzePage(link.href, ""); // 그 자리에서 분석 시작
+      e.preventDefault();
+      // 링크 이동 시 다시 로딩 화면으로
+      renderUI("loading"); 
+      analyzePage(link.href, ""); 
     });
   });
 }
