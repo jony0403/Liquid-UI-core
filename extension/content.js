@@ -15,7 +15,7 @@ function toggleUI() {
     return;
   }
 
-  // 2. UI 컨테이너 (그림자 효과 추가)
+  // UI 컨테이너
   liquidRoot = document.createElement("div");
   liquidRoot.id = "liquid-ui-container";
   liquidRoot.style.cssText = `
@@ -35,15 +35,23 @@ function toggleUI() {
   analyzePage(window.location.href, document.body.innerText);
 }
 
-// 3. UI 그리기 (이미지 태그 추가)
+// 2. UI 그리기 (이미지 강제 노출 로직 적용됨)
 function renderUI(state, data = "", imageUrl = "") {
-  // 스타일 정의
+  
+  // [핵심] 기본 이미지 설정
+  const defaultImg = "https://images.unsplash.com/photo-1504711434969-e33886168f5c?q=80&w=3870&auto=format&fit=crop";
+  
+  // 서버가 준 URL이 있으면 쓰고, 없거나 빈칸이면 기본값 사용
+  const finalUrl = imageUrl || defaultImg;
+  
+  // 무조건 'active'를 붙여서 숨겨지는 일 없게 함
+  const imgClass = "hero-image active"; 
+
   const style = `
     <style>
       body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #333; }
       .container { padding: 20px; height: 100%; box-sizing: border-box; overflow-y: auto; }
       h2 { margin: 0 0 15px 0; font-size: 20px; color: #1a73e8; font-weight: 700; display: flex; align-items: center; gap: 8px;}
-      .logo-icon { font-size: 24px; }
       
       /* 이미지 스타일 */
       .hero-image { width: 100%; height: 180px; object-fit: cover; border-radius: 12px; margin-bottom: 20px; display: none; background: #f0f0f0; }
@@ -69,13 +77,13 @@ function renderUI(state, data = "", imageUrl = "") {
         </div>
       </div>`;
   } else if (state === "success") {
-    // 이미지가 있으면 active 클래스 추가
-    const imgClass = imageUrl ? "hero-image active" : "hero-image";
-    
     shadowRoot.innerHTML = style + `
       <div class="container">
         <h2>🌊 Liquid Summary</h2>
-        <img src="${imageUrl}" class="${imgClass}" id="summary-image" onerror="this.style.display='none'">
+        
+        <img src="${finalUrl}" class="${imgClass}" id="summary-image" 
+             onerror="this.onerror=null; this.src='${defaultImg}';">
+        
         <div class="content" id="stream-target">${data}</div>
         <br>
         <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
@@ -85,8 +93,7 @@ function renderUI(state, data = "", imageUrl = "") {
   }
 }
 
-// 4. 데이터 분석 및 스트리밍 (핵심 로직 수정됨)
-// [수정] 데이터가 진짜 도착해야 화면을 바꾸는 똑똑한 로직
+// 3. 데이터 분석 및 스트리밍 (AI 첫 응답 시 바로 화면 전환)
 async function analyzePage(url, text) {
   try {
     const response = await fetch("http://localhost:8000/analyze", {
@@ -99,7 +106,7 @@ async function analyzePage(url, text) {
     const decoder = new TextDecoder();
     
     let buffer = ""; 
-    let isFirstChunk = true; // [핵심] 첫 데이터인지 확인하는 깃발
+    let isFirstChunk = true; // 첫 데이터 확인용 깃발
 
     while (true) {
       const { value, done } = await reader.read();
@@ -108,26 +115,26 @@ async function analyzePage(url, text) {
       const chunk = decoder.decode(value);
       buffer += chunk;
 
-      // [핵심 로직] AI가 입을 떼는 순간(첫 데이터 도착) 화면을 바꾼다!
+      // [핵심] 첫 데이터가 들어오자마자 로딩 끄고 결과창 보여줌
       if (isFirstChunk) {
-        renderUI("success", ""); // 이제 로딩 끄고 결과창 보여줌
+        renderUI("success", ""); 
         isFirstChunk = false;
       }
 
-      // 이제 화면에 뿌리기
       const target = shadowRoot.getElementById("stream-target");
       const imageTag = shadowRoot.getElementById("summary-image");
       
-      // (DOM이 생성된 후에만 업데이트)
       if (target) {
+        // 이미지 URL 파싱
         if (buffer.includes("IMAGE_URL::") && buffer.includes("::END")) {
           const start = buffer.indexOf("IMAGE_URL::");
           const end = buffer.indexOf("::END");
           
           const imgUrl = buffer.substring(start + 11, end).trim();
+          
+          // 파싱된 이미지가 있으면 교체 (onerror가 보호 중이라 안전)
           if (imageTag && imgUrl) {
             imageTag.src = imgUrl;
-            imageTag.classList.add("active");
           }
           
           target.innerText = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
@@ -137,7 +144,6 @@ async function analyzePage(url, text) {
       }
     }
   } catch (e) {
-    // 에러 나면 로딩 화면 유지하면서 에러 메시지 띄우기
     const loadingDiv = shadowRoot.querySelector(".loading");
     if (loadingDiv) {
         loadingDiv.innerHTML = `<p style="color:red; font-weight:bold;">앗, 에러가 났어요!<br>${e.message}</p>`;
@@ -147,15 +153,14 @@ async function analyzePage(url, text) {
   }
 }
 
-// 5. 링크 가로채기
+// 4. 링크 클릭 가로채기 (페이지 이동 방지)
 function attachLinkInterceptors() {
   const links = shadowRoot.querySelectorAll("a");
   links.forEach(link => {
     link.addEventListener("click", (e) => {
-      e.preventDefault();
-      renderUI("loading");
-      // 새 링크 클릭 시 텍스트 없이 URL만 보냄 -> 서버 크롤링 유도
-      analyzePage(link.href, ""); 
+      e.preventDefault(); // 이동 막고
+      renderUI("loading"); // 로딩 띄우고
+      analyzePage(link.href, ""); // 그 자리에서 분석 시작
     });
   });
 }
