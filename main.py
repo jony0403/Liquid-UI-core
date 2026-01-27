@@ -7,11 +7,14 @@ import google.generativeai as genai
 import httpx
 from bs4 import BeautifulSoup
 import asyncio
+import os
 from collections import OrderedDict # [NEW] 캐싱을 위한 도구
+from dotenv import load_dotenv
+load_dotenv()
 
 # ==========================================
 # [API KEY] 네 키가 여기 있어야 한다.
-GOOGLE_API_KEY = "내 키"
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 # ==========================================
 
 genai.configure(api_key=GOOGLE_API_KEY)
