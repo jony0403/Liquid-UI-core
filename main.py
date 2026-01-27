@@ -57,6 +57,41 @@ class AnalyzeRequest(BaseModel):
     text_content: str | None = None
 
 async def fetch_page_content(url: str):
+    # 우리가 사용할 '기본 이미지' (이미지 못 찾았을 때 띄울 짤)
+    DEFAULT_IMAGE = "https://images.unsplash.com/photo-1504711434969-e33886168f5c?q=80&w=3870&auto=format&fit=crop"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        try:
+            response = await client.get(url, headers=headers, timeout=10.0)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 1. 텍스트 추출
+            for script in soup(["script", "style", "nav", "footer", "header"]):
+                script.decompose()
+            text = soup.get_text(separator=' ', strip=True)[:5000]
+            
+            # 2. 이미지 추출 (og:image -> twitter:image -> 없으면 기본값)
+            image_url = ""
+            og_image = soup.find("meta", property="og:image")
+            
+            if og_image and og_image.get("content"):
+                image_url = og_image["content"]
+            else:
+                # [핵심] 이미지가 없으면 기본 이미지를 넣어라!
+                print("⚠️ 이미지를 못 찾았습니다. 기본 이미지를 사용합니다.")
+                image_url = DEFAULT_IMAGE
+            
+            return text, image_url
+            
+        except Exception as e:
+            print(f"Crawling Error: {e}")
+            return None, None
+        
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }

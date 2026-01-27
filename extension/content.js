@@ -79,7 +79,6 @@ function renderUI(state, data = "", imageUrl = "") {
         <div class="content" id="stream-target">${data}</div>
         <br>
         <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-        <a href="https://www.google.com">🔗 Google 테스트 링크 (클릭 시 이동 안함)</a>
       </div>
     `;
     attachLinkInterceptors();
@@ -87,6 +86,7 @@ function renderUI(state, data = "", imageUrl = "") {
 }
 
 // 4. 데이터 분석 및 스트리밍 (핵심 로직 수정됨)
+// [수정] 데이터가 진짜 도착해야 화면을 바꾸는 똑똑한 로직
 async function analyzePage(url, text) {
   try {
     const response = await fetch("http://localhost:8000/analyze", {
@@ -98,12 +98,8 @@ async function analyzePage(url, text) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     
-    // 초기 화면 렌더링 (빈 텍스트)
-    renderUI("success", "");
-    const target = shadowRoot.getElementById("stream-target");
-    const imageTag = shadowRoot.getElementById("summary-image");
-
-    let buffer = ""; // 데이터 조각을 모을 버퍼
+    let buffer = ""; 
+    let isFirstChunk = true; // [핵심] 첫 데이터인지 확인하는 깃발
 
     while (true) {
       const { value, done } = await reader.read();
@@ -112,32 +108,42 @@ async function analyzePage(url, text) {
       const chunk = decoder.decode(value);
       buffer += chunk;
 
-      // [핵심] 이미지 URL 파싱 로직 (IMAGE_URL::...::END)
-      if (buffer.includes("IMAGE_URL::") && buffer.includes("::END")) {
-        const start = buffer.indexOf("IMAGE_URL::");
-        const end = buffer.indexOf("::END");
-        
-        // URL 추출
-        const imgUrl = buffer.substring(start + 11, end).trim();
-        
-        // 이미지 태그에 적용
-        if (imageTag && imgUrl) {
-          imageTag.src = imgUrl;
-          imageTag.classList.add("active");
+      // [핵심 로직] AI가 입을 떼는 순간(첫 데이터 도착) 화면을 바꾼다!
+      if (isFirstChunk) {
+        renderUI("success", ""); // 이제 로딩 끄고 결과창 보여줌
+        isFirstChunk = false;
+      }
+
+      // 이제 화면에 뿌리기
+      const target = shadowRoot.getElementById("stream-target");
+      const imageTag = shadowRoot.getElementById("summary-image");
+      
+      // (DOM이 생성된 후에만 업데이트)
+      if (target) {
+        if (buffer.includes("IMAGE_URL::") && buffer.includes("::END")) {
+          const start = buffer.indexOf("IMAGE_URL::");
+          const end = buffer.indexOf("::END");
+          
+          const imgUrl = buffer.substring(start + 11, end).trim();
+          if (imageTag && imgUrl) {
+            imageTag.src = imgUrl;
+            imageTag.classList.add("active");
+          }
+          
+          target.innerText = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
+        } else {
+          target.innerText = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
         }
-        
-        // 텍스트에서 이미지 태그 부분 제거하고 표시
-        const cleanText = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
-        target.innerText = cleanText;
-      } else {
-        // 이미지가 아직 없거나 텍스트만 있는 경우
-        // (태그가 섞여있을 수 있으니 임시로 정제)
-        const cleanText = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
-        target.innerText = cleanText;
       }
     }
   } catch (e) {
-    shadowRoot.innerHTML += `<p style="color:red; padding:20px;">에러 발생: ${e.message}</p>`;
+    // 에러 나면 로딩 화면 유지하면서 에러 메시지 띄우기
+    const loadingDiv = shadowRoot.querySelector(".loading");
+    if (loadingDiv) {
+        loadingDiv.innerHTML = `<p style="color:red; font-weight:bold;">앗, 에러가 났어요!<br>${e.message}</p>`;
+    } else {
+        shadowRoot.innerHTML += `<p style="color:red">에러: ${e.message}</p>`;
+    }
   }
 }
 
