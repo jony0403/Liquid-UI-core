@@ -1,8 +1,11 @@
 let liquidRoot = null;
 let shadowRoot = null;
 
+// 1. 메시지 수신
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "TOGGLE_LIQUID_UI") toggleUI();
+  if (request.action === "TOGGLE_LIQUID_UI") {
+    toggleUI();
+  }
 });
 
 function toggleUI() {
@@ -12,12 +15,19 @@ function toggleUI() {
     return;
   }
 
+  // 2. UI 컨테이너 (그림자 효과 추가)
   liquidRoot = document.createElement("div");
+  liquidRoot.id = "liquid-ui-container";
   liquidRoot.style.cssText = `
-    position: fixed; top: 20px; right: 20px; width: 375px; height: 800px;
-    z-index: 2147483647; box-shadow: -5px 0 15px rgba(0,0,0,0.2);
-    border-radius: 20px; background: white;
+    position: fixed; top: 20px; right: 20px; width: 380px; height: 800px;
+    z-index: 2147483647; 
+    border-radius: 20px; 
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    background: white;
+    overflow: hidden;
+    transition: all 0.3s ease;
   `;
+
   shadowRoot = liquidRoot.attachShadow({ mode: "open" });
   document.body.appendChild(liquidRoot);
 
@@ -25,22 +35,58 @@ function toggleUI() {
   analyzePage(window.location.href, document.body.innerText);
 }
 
-function renderUI(state, data = "") {
-  const style = `<style>body{padding:20px;font-family:sans-serif;} a{display:block;padding:10px;border-bottom:1px solid #eee;}</style>`;
-  
+// 3. UI 그리기 (이미지 태그 추가)
+function renderUI(state, data = "", imageUrl = "") {
+  // 스타일 정의
+  const style = `
+    <style>
+      body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #333; }
+      .container { padding: 20px; height: 100%; box-sizing: border-box; overflow-y: auto; }
+      h2 { margin: 0 0 15px 0; font-size: 20px; color: #1a73e8; font-weight: 700; display: flex; align-items: center; gap: 8px;}
+      .logo-icon { font-size: 24px; }
+      
+      /* 이미지 스타일 */
+      .hero-image { width: 100%; height: 180px; object-fit: cover; border-radius: 12px; margin-bottom: 20px; display: none; background: #f0f0f0; }
+      .hero-image.active { display: block; }
+      
+      .content { line-height: 1.7; font-size: 15px; color: #444; white-space: pre-wrap; }
+      
+      .loading { text-align: center; margin-top: 50%; transform: translateY(-50%); }
+      .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      
+      a { color: #1a73e8; text-decoration: none; display: block; padding: 12px; background: #f8f9fa; border-radius: 8px; margin-top: 10px; font-weight: 500; font-size: 14px; transition: background 0.2s; }
+      a:hover { background: #e8f0fe; }
+    </style>
+  `;
+
   if (state === "loading") {
-    shadowRoot.innerHTML = style + `<h3>🧠 AI 분석 중...</h3>`;
-  } else {
     shadowRoot.innerHTML = style + `
-      <h2>🌊 Liquid Summary</h2>
-      <div id="stream-target">${data}</div>
-      <br>
-      <a href="[https://www.google.com](https://www.google.com)">테스트 링크 (클릭해보셈)</a>
+      <div class="container">
+        <div class="loading">
+          <div class="spinner"></div>
+          <p>AI가 페이지를 분석 중입니다...</p>
+        </div>
+      </div>`;
+  } else if (state === "success") {
+    // 이미지가 있으면 active 클래스 추가
+    const imgClass = imageUrl ? "hero-image active" : "hero-image";
+    
+    shadowRoot.innerHTML = style + `
+      <div class="container">
+        <h2>🌊 Liquid Summary</h2>
+        <img src="${imageUrl}" class="${imgClass}" id="summary-image" onerror="this.style.display='none'">
+        <div class="content" id="stream-target">${data}</div>
+        <br>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+        <a href="https://www.google.com">🔗 Google 테스트 링크 (클릭 시 이동 안함)</a>
+      </div>
     `;
     attachLinkInterceptors();
   }
 }
 
+// 4. 데이터 분석 및 스트리밍 (핵심 로직 수정됨)
 async function analyzePage(url, text) {
   try {
     const response = await fetch("http://localhost:8000/analyze", {
@@ -48,26 +94,62 @@ async function analyzePage(url, text) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: url, text_content: text }),
     });
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    
+    // 초기 화면 렌더링 (빈 텍스트)
     renderUI("success", "");
     const target = shadowRoot.getElementById("stream-target");
-    
+    const imageTag = shadowRoot.getElementById("summary-image");
+
+    let buffer = ""; // 데이터 조각을 모을 버퍼
+
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      target.innerText += decoder.decode(value);
+      
+      const chunk = decoder.decode(value);
+      buffer += chunk;
+
+      // [핵심] 이미지 URL 파싱 로직 (IMAGE_URL::...::END)
+      if (buffer.includes("IMAGE_URL::") && buffer.includes("::END")) {
+        const start = buffer.indexOf("IMAGE_URL::");
+        const end = buffer.indexOf("::END");
+        
+        // URL 추출
+        const imgUrl = buffer.substring(start + 11, end).trim();
+        
+        // 이미지 태그에 적용
+        if (imageTag && imgUrl) {
+          imageTag.src = imgUrl;
+          imageTag.classList.add("active");
+        }
+        
+        // 텍스트에서 이미지 태그 부분 제거하고 표시
+        const cleanText = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
+        target.innerText = cleanText;
+      } else {
+        // 이미지가 아직 없거나 텍스트만 있는 경우
+        // (태그가 섞여있을 수 있으니 임시로 정제)
+        const cleanText = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
+        target.innerText = cleanText;
+      }
     }
-  } catch (e) { shadowRoot.innerHTML += `<p style="color:red">${e.message}</p>`; }
+  } catch (e) {
+    shadowRoot.innerHTML += `<p style="color:red; padding:20px;">에러 발생: ${e.message}</p>`;
+  }
 }
 
+// 5. 링크 가로채기
 function attachLinkInterceptors() {
-  shadowRoot.querySelectorAll("a").forEach(link => {
+  const links = shadowRoot.querySelectorAll("a");
+  links.forEach(link => {
     link.addEventListener("click", (e) => {
-      e.preventDefault(); // 이동 막기
+      e.preventDefault();
       renderUI("loading");
-      // 여기서 나중에 '새 URL' 분석 요청 보내면 됨
-      analyzePage(link.href, "새 링크 클릭됨. (실제론 크롤링 필요)");
+      // 새 링크 클릭 시 텍스트 없이 URL만 보냄 -> 서버 크롤링 유도
+      analyzePage(link.href, ""); 
     });
   });
 }
