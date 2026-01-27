@@ -56,7 +56,128 @@ class AnalyzeRequest(BaseModel):
     url: str
     text_content: str | None = None
 
+# [Final Version] 산탄총 방식 크롤러 (모든 태그 다 뒤짐)
 async def fetch_page_content(url: str):
+    DEFAULT_IMAGE = "https://images.unsplash.com/photo-1504711434969-e33886168f5c?q=80&w=3870&auto=format&fit=crop"
+
+    # [핵심 1] 헤더를 진짜 사람처럼 완벽하게 위장
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.naver.com/" 
+    }
+    
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        try:
+            response = await client.get(url, headers=headers, timeout=10.0)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 1. 텍스트 추출
+            for script in soup(["script", "style", "nav", "footer", "header", "iframe", "button"]):
+                script.decompose()
+            text = soup.get_text(separator=' ', strip=True)[:5000]
+            
+            # 2. 이미지 추출 (우선순위별로 샅샅이 뒤짐)
+            image_url = ""
+            
+            # [Level 1] 메타 태그 (가장 확실함)
+            candidates = [
+                soup.find("meta", property="og:image"),
+                soup.find("meta", name="twitter:image"),
+                soup.find("meta", property="twitter:image") # 가끔 property로 쓰는 애들도 있음
+            ]
+            
+            for candidate in candidates:
+                if candidate and candidate.get("content"):
+                    image_url = candidate["content"]
+                    print(f"✅ 메타 태그에서 이미지 확보: {image_url[:30]}...")
+                    break
+            
+            # [Level 2] 본문 이미지 강제 수색 (메타 태그가 없을 때)
+            if not image_url:
+                # 네이버 뉴스, 연예, 스포츠, 포스트 등 온갖 ID/Class 총집합
+                selectors = [
+                    "#img1", # 연예뉴스 대표 이미지
+                    ".end_photo_org img", # 일반뉴스 본문 이미지
+                    "#articleBodyContents img", 
+                    "#newsEndContents img",
+                    ".sc_view_img", # 포스트/블로그
+                    "figure img",   # 일반적인 HTML5 구조
+                    ".media_end_head_photo_img" # 최신 네이버 뉴스 헤더
+                ]
+                
+                for selector in selectors:
+                    img_tag = soup.select_one(selector)
+                    if img_tag and img_tag.get("src"):
+                        image_url = img_tag["src"]
+                        print(f"✅ 본문 태그({selector})에서 이미지 확보: {image_url[:30]}...")
+                        break
+
+            # [결과 판정]
+            if not image_url:
+                print("⚠️ 모든 수색 실패. 기본 이미지 사용.")
+                image_url = DEFAULT_IMAGE
+            
+            return text, image_url
+            
+        except Exception as e:
+            print(f"Crawling Error: {e}")
+            return None, None
+    DEFAULT_IMAGE = "https://images.unsplash.com/photo-1504711434969-e33886168f5c?q=80&w=3870&auto=format&fit=crop"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        try:
+            response = await client.get(url, headers=headers, timeout=10.0)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 1. 텍스트 추출 (불필요한 태그 제거)
+            for script in soup(["script", "style", "nav", "footer", "header", "iframe"]):
+                script.decompose()
+            text = soup.get_text(separator=' ', strip=True)[:5000]
+            
+            # 2. 이미지 추출 (3중 안전장치)
+            image_url = ""
+            
+            # [시도 1] 메타 태그 (og:image) - 가장 화질 좋음
+            og_image = soup.find("meta", property="og:image")
+            if og_image and og_image.get("content"):
+                image_url = og_image["content"]
+            
+            # [시도 2] 트위터 태그 (twitter:image) - og:image 없을 때
+            if not image_url:
+                tw_image = soup.find("meta", name="twitter:image")
+                if tw_image and tw_image.get("content"):
+                    image_url = tw_image["content"]
+            
+            # [시도 3] 본문 안에서 첫 번째 이미지 찾기 (네이버 뉴스 특화)
+            if not image_url:
+                # 네이버 뉴스 본문 영역 ID들 (#dic_area: 일반뉴스, #articeBody: 연예 등)
+                content_body = soup.select_one("#dic_area, #articleBodyContents, .news_end, #newsEndContents")
+                if content_body:
+                    first_img = content_body.find("img")
+                    if first_img and first_img.get("src"):
+                        image_url = first_img["src"]
+
+            # [결과 판정]
+            if image_url:
+                print(f"📸 이미지 발견 성공: {image_url[:50]}...")
+            else:
+                print("⚠️ 끝내 이미지를 못 찾았습니다. 기본 이미지 사용.")
+                image_url = DEFAULT_IMAGE
+            
+            return text, image_url
+            
+        except Exception as e:
+            print(f"Crawling Error: {e}")
+            return None, None
+        
     # 우리가 사용할 '기본 이미지' (이미지 못 찾았을 때 띄울 짤)
     DEFAULT_IMAGE = "https://images.unsplash.com/photo-1504711434969-e33886168f5c?q=80&w=3870&auto=format&fit=crop"
 

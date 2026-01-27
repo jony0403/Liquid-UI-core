@@ -106,7 +106,7 @@ async function analyzePage(url, text) {
     const decoder = new TextDecoder();
     
     let buffer = ""; 
-    let isFirstChunk = true; // 첫 데이터 확인용 깃발
+    let isFirstChunk = true;
 
     while (true) {
       const { value, done } = await reader.read();
@@ -115,7 +115,6 @@ async function analyzePage(url, text) {
       const chunk = decoder.decode(value);
       buffer += chunk;
 
-      // [핵심] 첫 데이터가 들어오자마자 로딩 끄고 결과창 보여줌
       if (isFirstChunk) {
         renderUI("success", ""); 
         isFirstChunk = false;
@@ -125,17 +124,21 @@ async function analyzePage(url, text) {
       const imageTag = shadowRoot.getElementById("summary-image");
       
       if (target) {
-        // 이미지 URL 파싱
         if (buffer.includes("IMAGE_URL::") && buffer.includes("::END")) {
           const start = buffer.indexOf("IMAGE_URL::");
           const end = buffer.indexOf("::END");
           
-          const imgUrl = buffer.substring(start + 11, end).trim();
+          // [여기서부터 수정됨]
+          const rawUrl = buffer.substring(start + 11, end).trim();
           
-          // 파싱된 이미지가 있으면 교체 (onerror가 보호 중이라 안전)
-          if (imageTag && imgUrl) {
-            imageTag.src = imgUrl;
+          // 세탁소(Proxy)를 거친 URL 생성
+          // &w=400&h=200 : 사이즈도 적당히 최적화해서 가져온다 (속도 빨라짐)
+          const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&w=400&h=200&fit=cover`;
+          
+          if (imageTag && rawUrl) {
+            imageTag.src = proxyUrl;
           }
+          // [여기까지]
           
           target.innerText = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
         } else {
