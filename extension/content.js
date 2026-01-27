@@ -15,7 +15,7 @@ function toggleUI() {
     return;
   }
 
-  // UI 컨테이너
+  // UI 컨테이너 생성
   liquidRoot = document.createElement("div");
   liquidRoot.id = "liquid-ui-container";
   liquidRoot.style.cssText = `
@@ -31,8 +31,22 @@ function toggleUI() {
   shadowRoot = liquidRoot.attachShadow({ mode: "open" });
   document.body.appendChild(liquidRoot);
 
-  renderUI("loading");
-  analyzePage(window.location.href, document.body.innerText);
+  // [핵심 기술] 현재 페이지의 메타태그(og:image)를 직접 조회
+  // 서버가 못 찾아도 내 브라우저는 알고 있다.
+  const metaImg = document.querySelector('meta[property="og:image"]');
+  const localImage = metaImg ? metaImg.content : "";
+
+  // [중요] 세탁소(Proxy)를 거쳐서 바로 띄워버린다.
+  let finalImgUrl = "";
+  if (localImage) {
+      finalImgUrl = `https://wsrv.nl/?url=${encodeURIComponent(localImage)}&w=400&h=200&fit=cover`;
+  }
+
+  // 로딩 화면이 뜰 때, 이미지는 미리 박아둔다. (기다릴 필요 없음)
+  renderUI("loading", "", finalImgUrl);
+  
+  // 텍스트 분석 시작 (이미지 URL은 이미 찾았으니 텍스트만 신경 쓰라고 함)
+  analyzePage(window.location.href, document.body.innerText, finalImgUrl);
 }
 
 // 2. UI 그리기 (이미지 강제 노출 로직 적용됨)
@@ -93,8 +107,8 @@ function renderUI(state, data = "", imageUrl = "") {
   }
 }
 
-// 3. 데이터 분석 및 스트리밍 (AI 첫 응답 시 바로 화면 전환)
-async function analyzePage(url, text) {
+// [수정] analyzePage 함수: 이미 찾은 이미지가 있으면 서버 이미지는 무시한다.
+async function analyzePage(url, text, preloadedImage = "") {
   try {
     const response = await fetch("http://localhost:8000/analyze", {
       method: "POST",
@@ -116,7 +130,8 @@ async function analyzePage(url, text) {
       buffer += chunk;
 
       if (isFirstChunk) {
-        renderUI("success", ""); 
+        // 이미지가 있으면 그걸 쓰고, 없으면 빈칸으로 시작
+        renderUI("success", "", preloadedImage); 
         isFirstChunk = false;
       }
 
@@ -128,17 +143,16 @@ async function analyzePage(url, text) {
           const start = buffer.indexOf("IMAGE_URL::");
           const end = buffer.indexOf("::END");
           
-          // [여기서부터 수정됨]
+          // 서버가 찾은 이미지 주소
           const rawUrl = buffer.substring(start + 11, end).trim();
           
-          // 세탁소(Proxy)를 거친 URL 생성
-          // &w=400&h=200 : 사이즈도 적당히 최적화해서 가져온다 (속도 빨라짐)
-          const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&w=400&h=200&fit=cover`;
-          
-          if (imageTag && rawUrl) {
-            imageTag.src = proxyUrl;
+          // [핵심] 
+          // 1. 우리가 이미 찾은 이미지(preloadedImage)가 있으면 서버 거 무시!
+          // 2. 만약 우리가 못 찾았는데(빈칸), 서버가 찾았으면 그걸 쓴다.
+          if (!preloadedImage && rawUrl) {
+             const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(rawUrl)}&w=400&h=200&fit=cover`;
+             if (imageTag) imageTag.src = proxyUrl;
           }
-          // [여기까지]
           
           target.innerText = buffer.replace(/IMAGE_URL::.*?::END\s*/g, "");
         } else {
@@ -147,12 +161,9 @@ async function analyzePage(url, text) {
       }
     }
   } catch (e) {
-    const loadingDiv = shadowRoot.querySelector(".loading");
-    if (loadingDiv) {
-        loadingDiv.innerHTML = `<p style="color:red; font-weight:bold;">앗, 에러가 났어요!<br>${e.message}</p>`;
-    } else {
-        shadowRoot.innerHTML += `<p style="color:red">에러: ${e.message}</p>`;
-    }
+      // 에러 처리 (기존과 동일)
+      const loadingDiv = shadowRoot.querySelector(".loading");
+      if (loadingDiv) loadingDiv.innerHTML = `<p style="color:red;">에러: ${e.message}</p>`;
   }
 }
 
