@@ -1,16 +1,18 @@
-// [background.js] 이미지 데이터 직접 납치 버전
-chrome.action.onClicked.addListener((tab) => {
-  chrome.tabs.sendMessage(tab.id, { action: "TOGGLE_LIQUID_UI" })
-    .catch((error) => console.log("탭 오류:", error));
-});
-
-// [핵심] Content Script의 요청을 받아 이미지를 Blob 데이터로 변환해 리턴한다.
+// [background.js]
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "TOGGLE_LIQUID_UI") {
+    chrome.tabs.sendMessage(sender.tab ? sender.tab.id : request.tabId, { action: "TOGGLE_LIQUID_UI" })
+      .catch(() => console.log("탭 연결 실패"));
+    return;
+  }
+
   if (request.action === "FETCH_IMAGE_BLOB") {
     fetch(request.url)
-      .then(response => response.blob())
+      .then(response => {
+        if (!response.ok) throw new Error('Network fail');
+        return response.blob();
+      })
       .then(blob => {
-        // Blob을 Base64 문자열(Data URL)로 변환
         const reader = new FileReader();
         reader.onloadend = () => {
           sendResponse({ success: true, data: reader.result });
@@ -18,9 +20,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         reader.readAsDataURL(blob);
       })
       .catch(error => {
-        console.error("이미지 납치 실패:", error);
+        // 실패해도 응답은 보내야 UI가 안 멈춤
         sendResponse({ success: false });
       });
-    return true; // 비동기 응답을 위해 필수
+    return true; 
   }
+});
+
+chrome.action.onClicked.addListener((tab) => {
+  chrome.tabs.sendMessage(tab.id, { action: "TOGGLE_LIQUID_UI" }).catch(() => {});
 });

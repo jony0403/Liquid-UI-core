@@ -1,17 +1,41 @@
-// [ui.js] 이미지 슬라이더(Carousel) 탑재 UI
+// [ui.js] 확실한 실행 & 토글 로직
 
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.action === "TOGGLE_LIQUID_UI") toggleUI();
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.action === "TOGGLE_LIQUID_UI") {
+    console.log("[UI] Toggle Command Received");
+    toggleUI();
+  }
 });
 
-// 전역 상태 관리 (현재 보고 있는 이미지 인덱스)
-let currentIndex = 0;
 let imageList = [];
-let shadowRootRef = null;
+let currentIndex = 0;
 
 function toggleUI() {
-  const old = document.getElementById("liquid-ui-container");
-  if (old) { old.remove(); document.body.style.overflow = "auto"; return; }
+  const existing = document.getElementById("liquid-ui-container");
+  
+  if (existing) {
+    console.log("[UI] Closing...");
+    existing.remove();
+    document.body.style.overflow = "auto";
+    return;
+  }
+  
+  console.log("[UI] Opening...");
+  // 바로 실행하지 않고 안전하게 init 호출
+  initUI(0);
+}
+
+function initUI(retryCount) {
+  // Logic 모듈 로드 체크 (최대 1초 대기)
+  if (!window.LiquidLogic) {
+    if (retryCount < 10) {
+      console.log(`[UI] Logic not ready, retrying (${retryCount + 1}/10)...`);
+      setTimeout(() => initUI(retryCount + 1), 100);
+    } else {
+      alert("Liquid View 오류: 스크립트 로딩 실패. 새로고침 해주세요.");
+    }
+    return;
+  }
 
   document.body.style.overflow = "hidden";
   const container = document.createElement("div");
@@ -24,142 +48,56 @@ function toggleUI() {
   
   const shadow = container.attachShadow({ mode: "open" });
   document.body.appendChild(container);
-  shadowRootRef = shadow; // 나중에 쓰려고 저장
 
-  // [Logic] 이미지 싹쓸이해오기
-  imageList = window.LiquidLogic.collectAllImages();
-  currentIndex = 0; // 0번부터 시작
+  renderBaseUI(shadow);
 
-  renderCarouselUI(shadow);
-  
-  // 첫 번째 이미지 로드
-  if (imageList.length > 0) {
-    loadImage(shadow, 0);
-  } else {
-    // 이미지가 아예 없으면 박스 숨김
-    shadow.getElementById('carousel-box').style.display = 'none';
+  try {
+    // 로직 호출
+    imageList = window.LiquidLogic.getTopImages();
+    console.log("[UI] Images found:", imageList);
+    
+    currentIndex = 0;
+
+    if (imageList.length > 0) {
+      loadImage(shadow, 0);
+    } else {
+      shadow.getElementById('img-container').style.display = 'none';
+    }
+    
+    // 텍스트 요약
+    const contentNode = document.querySelector('.wiki-content') 
+                      || document.querySelector('#mw-content-text')
+                      || document.body;
+    startStreaming(shadow, contentNode.innerText);
+  } catch (err) {
+    console.error(err);
+    shadow.getElementById("stream-text").innerText = "오류 발생: " + err.message;
   }
-
-  startStreaming(shadow, document.body.innerText);
 }
 
-// 이미지 로드 (Background에 요청)
 function loadImage(shadow, index) {
-  if (index < 0 || index >= imageList.length) return;
+  if (index >= imageList.length) {
+    // 이미지 로드 실패 등으로 다 돌았는데도 없으면 숨김
+    if (index === 0) shadow.getElementById('img-container').style.display = 'none';
+    return;
+  }
+
+  const imgEl = shadow.getElementById("current-img");
+  const counter = shadow.getElementById("img-counter");
   
-  const imgElement = shadow.getElementById('current-img');
-  const counter = shadow.getElementById('img-counter');
+  imgEl.style.opacity = '0.3';
   
-  // 로딩 중 표시
-  imgElement.style.opacity = '0.5';
-  
-  chrome.runtime.sendMessage({ action: "FETCH_IMAGE_BLOB", url: imageList[index] }, (response) => {
-    if (response && response.success) {
-      imgElement.src = response.data;
-      imgElement.style.opacity = '1';
-      // 카운터 업데이트 (예: 1 / 5)
+  chrome.runtime.sendMessage({ action: "FETCH_IMAGE_BLOB", url: imageList[index] }, (res) => {
+    if (res && res.success) {
+      imgEl.src = res.data;
+      imgEl.style.opacity = '1';
       counter.innerText = `${index + 1} / ${imageList.length}`;
+      currentIndex = index;
     } else {
-      // 실패하면 다음 거 시도 (재귀)
-      if (index + 1 < imageList.length) {
-         currentIndex++;
-         loadImage(shadow, currentIndex);
-      }
+      console.log("[UI] Image Load Failed, trying next:", imageList[index]);
+      loadImage(shadow, index + 1);
     }
   });
-}
-
-// UI 렌더링
-function renderCarouselUI(shadow) {
-  shadow.innerHTML = `
-    <style>
-      :host { width: 100%; min-height: 100vh; background: #fff; }
-      .wrap { 
-        width: 100%; max-width: 800px; margin: 0 auto;
-        padding: 80px 20px 100px; 
-        font-family: -apple-system, BlinkMacSystemFont, "Pretendard", sans-serif;
-      }
-      .close-btn { 
-        position: fixed; top: 30px; right: 40px; font-size: 40px; cursor: pointer; border: none; background: none; z-index: 99999; 
-      }
-      
-      h1 { font-size: 40px; font-weight: 900; margin-bottom: 30px; color: #111; }
-      
-      /* [슬라이더 스타일] */
-      #carousel-box { 
-        width: 100%; height: 50vh; margin-bottom: 40px; 
-        background: #f4f4f4; border-radius: 20px; 
-        position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;
-      }
-      
-      #current-img { 
-        max-width: 100%; max-height: 100%; object-fit: contain; 
-        transition: opacity 0.3s;
-      }
-      
-      /* 화살표 버튼 */
-      .nav-btn {
-        position: absolute; top: 50%; transform: translateY(-50%);
-        background: rgba(255,255,255,0.8); border: none; border-radius: 50%;
-        width: 50px; height: 50px; cursor: pointer; font-size: 24px; font-weight: bold;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.1); z-index: 10;
-        display: flex; align-items: center; justify-content: center;
-      }
-      .nav-btn:hover { background: #fff; transform: translateY(-50%) scale(1.1); }
-      #prev-btn { left: 20px; }
-      #next-btn { right: 20px; }
-      
-      /* 카운터 */
-      #img-counter {
-        position: absolute; bottom: 15px; right: 20px;
-        background: rgba(0,0,0,0.6); color: #fff; padding: 5px 12px;
-        border-radius: 20px; font-size: 14px;
-      }
-
-      #stream-text { font-size: 20px; line-height: 1.8; color: #333; white-space: pre-wrap; }
-    </style>
-    
-    <div class="wrap">
-      <button class="close-btn" id="close-x">✕</button>
-      
-      <h1>Liquid View</h1>
-      
-      <div id="carousel-box">
-        <button class="nav-btn" id="prev-btn">‹</button>
-        <img id="current-img" src="">
-        <button class="nav-btn" id="next-btn">›</button>
-        <div id="img-counter">0 / 0</div>
-      </div>
-      
-      <div id="stream-text">분석 중...</div>
-    </div>
-  `;
-  
-  // 이벤트 리스너 연결
-  shadow.getElementById("close-x").onclick = () => {
-    document.getElementById("liquid-ui-container").remove();
-    document.body.style.overflow = "auto";
-  };
-
-  shadow.getElementById("prev-btn").onclick = () => {
-    if (currentIndex > 0) {
-      currentIndex--;
-      loadImage(shadow, currentIndex);
-    }
-  };
-
-  shadow.getElementById("next-btn").onclick = () => {
-    if (currentIndex < imageList.length - 1) {
-      currentIndex++;
-      loadImage(shadow, currentIndex);
-    }
-  };
-  
-  // 이미지가 1개 이하면 버튼 숨기기
-  if (imageList.length <= 1) {
-    shadow.getElementById("prev-btn").style.display = 'none';
-    shadow.getElementById("next-btn").style.display = 'none';
-  }
 }
 
 async function startStreaming(shadow, text) {
@@ -172,8 +110,39 @@ async function startStreaming(shadow, text) {
       const { value, done } = await reader.read();
       if (done) break;
       if (isFirst) { target.innerHTML = ""; isFirst = false; }
-      const chunk = decoder.decode(value);
-      if (!chunk.includes("IMAGE_URL::")) target.innerText += chunk;
+      target.innerText += decoder.decode(value);
     }
-  } catch (e) { target.innerText = "서버 연결 실패"; }
+  } catch (e) { target.innerText = "서버 연결 실패 (포트 8000 확인)"; }
+}
+
+function renderBaseUI(shadow) {
+  shadow.innerHTML = `
+    <style>
+      :host { width: 100%; min-height: 100vh; background: #fff; font-family: sans-serif; }
+      .wrap { width: 100%; max-width: 800px; margin: 0 auto; padding: 60px 20px 100px; }
+      .close-btn { position: fixed; top: 30px; right: 40px; font-size: 45px; cursor: pointer; border: none; background: none; z-index: 99999; }
+      .close-btn:hover { color: red; transform: scale(1.1); }
+      h1 { font-size: 40px; font-weight: 900; margin-bottom: 30px; color: #111; }
+      #img-container { width: 100%; height: 50vh; margin-bottom: 40px; border-radius: 20px; background: #f8f9fa; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+      #current-img { max-width: 100%; max-height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.3s; }
+      .nav-btn { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.8); border: none; border-radius: 50%; width: 44px; height: 44px; cursor: pointer; font-size: 20px; font-weight: bold; z-index: 10; }
+      #prev-btn { left: 15px; } #next-btn { right: 15px; }
+      #img-counter { position: absolute; bottom: 15px; right: 20px; background: rgba(0,0,0,0.5); color: #fff; padding: 4px 10px; border-radius: 12px; font-size: 13px; }
+      #stream-text { font-size: 20px; line-height: 1.8; color: #222; white-space: pre-wrap; }
+    </style>
+    <div class="wrap">
+      <button class="close-btn" id="close-x">×</button>
+      <h1>Liquid View</h1>
+      <div id="img-container">
+        <button class="nav-btn" id="prev-btn">‹</button>
+        <img id="current-img" src="">
+        <button class="nav-btn" id="next-btn">›</button>
+        <div id="img-counter">1 / 5</div>
+      </div>
+      <div id="stream-text">분석 중...</div>
+    </div>
+  `;
+  shadow.getElementById("close-x").onclick = () => toggleUI();
+  shadow.getElementById("prev-btn").onclick = () => { if (currentIndex > 0) loadImage(shadow, --currentIndex); };
+  shadow.getElementById("next-btn").onclick = () => { if (currentIndex < imageList.length - 1) loadImage(shadow, ++currentIndex); };
 }
