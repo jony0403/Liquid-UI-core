@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Liquid UI - Physical Core Evolution</title>
+    <link rel="stylesheet" href="style.css"> <style>
+        body { margin: 0; padding: 0; overflow: hidden; background: #020c1b; font-family: 'Pretendard', sans-serif; }
+        #world-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #particle-canvas { position: absolute; top: 0; left: 0; filter: url('#liquid-goo'); z-index: 5; cursor: pointer; }
+        #ui-layer { position: relative; z-index: 10; width: 100vw; height: 100vh; pointer-events: none; }
+        .text-container {
+            position: absolute; display: flex; flex-direction: column; justify-content: center; align-items: center;
+            transform: translate(-50%, -50%); text-align: center; color: white; user-select: none;
+            text-shadow: 0 4px 15px rgba(0, 0, 0, 0.9); z-index: 20; pointer-events: none;
+            transition: opacity 0.4s ease; width: auto; padding: 5px; box-sizing: border-box; opacity: 0; 
+        }
+        .summary { font-weight: 900; line-height: 1.2; word-break: break-all; overflow-wrap: break-word; font-size: clamp(14px, 4vmin, 40px); width: 100%; }
+        .original-content { 
+            font-weight: 500; opacity: 0; height: 0; transition: 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
+            margin-top: 10px; color: #e0f2ff; width: 100%; word-break: keep-all; overflow-wrap: break-word; 
+            line-height: 1.4; font-size: clamp(12px, 2.5vmin, 24px); overflow: hidden; 
+        }
+        .expanded .original-content { opacity: 1; height: auto; }
+    </style>
+</head>
+<body>
+    <div id="world-container">
+        <canvas id="particle-canvas"></canvas>
+        <div id="ui-layer"></div>
+    </div>
+    
+    <svg style="display:none;"><defs><filter id="liquid-goo">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur" />
+        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 25 -12" result="goo" />
+        <feComposite in="SourceGraphic" in2="goo" operator="atop"/></filter></defs>
+    </svg>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script src="liquid-data.js"></script>
+    <script src="liquid-utils.js"></script>
+    <script src="liquid-physics.js"></script>
+    <script src="liquid-core.js"></script>
+</body>
+</html>
